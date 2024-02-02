@@ -1,4 +1,8 @@
+use core::fmt;
+
 use serde::Deserialize;
+
+use crate::ARGS;
 
 const CHAT_COMPLETION_URL: &str = "https://api.openai.com/v1/chat/completions";
 
@@ -31,7 +35,7 @@ pub struct Usage {
 
 #[derive(Deserialize)]
 pub struct Choice {
-    pub finish_reason: String,
+    pub finish_reason: Option<String>,
     pub index: u32,
     pub message: Message,
 }
@@ -44,40 +48,53 @@ pub struct ChatCompletionResponse {
     pub model: String,
     pub system_fingerprint: Option<String>,
     pub object: String,
-    pub usage: Usage,
+    pub usage: Option<Usage>,
 }
 
-pub fn get_completion(model: &str, prompt: &str) -> Result<Choice, Box<dyn std::error::Error>> {
-    // TODO: figure out if caching makes sense here
-    let api_key = std::env::var("OPENAI_API_KEY").or(Err("Failed to get OPENAI_API_KEY"))?;
+#[derive(Debug)]
+pub struct JsonParseErrorData {
+    pub serde_error: serde_json::Error,
+    pub raw_json: String,
+}
 
-    let body = serde_json::json!({
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt,
-            }
-        ],
-    });
+#[derive(Debug)]
+pub enum OpenAIError {
+    JsonParseError(JsonParseErrorData),
+    ReqwestError(reqwest::Error),
+}
+
+impl fmt::Display for OpenAIError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            OpenAIError::JsonParseError(data) => write!(
+                f,
+                "Failed to parse JSON: {}\nOriginal JSON: {}",
+                data.serde_error, data.raw_json
+            ),
+            OpenAIError::ReqwestError(e) => write!(f, "Reqwest error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for OpenAIError {}
+
+pub fn get_completion(body: serde_json::Value) -> Result<ChatCompletionResponse, OpenAIError> {
+    let api_key = &ARGS.openai_api_key;
 
     let client = reqwest::blocking::Client::new();
     let response_body = client
         .post(CHAT_COMPLETION_URL)
         .json(&body)
         .header("Authorization", format!("Bearer {}", api_key))
-        .send()?
-        .text()?;
-    let mut completion: ChatCompletionResponse = match serde_json::from_str(&response_body) {
-        Ok(json) => json,
-        Err(e) => Err(format!(
-            "Failed to parse response: {}\nOriginal response: {}",
-            e, response_body
-        ))?,
-    };
+        .send()
+        .map_err(OpenAIError::ReqwestError)?
+        .text()
+        .map_err(OpenAIError::ReqwestError)?;
 
-    match completion.choices.pop() {
-        Some(choice) => Ok(choice),
-        None => Err("Failed to get completion")?,
-    }
+    serde_json::from_str(&response_body).map_err(|e| {
+        OpenAIError::JsonParseError(JsonParseErrorData {
+            serde_error: e,
+            raw_json: response_body,
+        })
+    })
 }
