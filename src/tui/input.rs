@@ -11,6 +11,7 @@ pub struct Input {
 enum InputAction {
     Confirm,
     Char(char),
+    OtherKey(Key),
 }
 
 impl ReadAction<InputAction> for Input {
@@ -18,9 +19,7 @@ impl ReadAction<InputAction> for Input {
         match key {
             Key::Enter => Some(InputAction::Confirm),
             Key::Char(char) => Some(InputAction::Char(char)),
-            Key::Backspace => Some(InputAction::Char('\x08')),
-            Key::Del => Some(InputAction::Char('\x7F')),
-            _ => None,
+            key => Some(InputAction::OtherKey(key)),
         }
     }
 }
@@ -51,6 +50,11 @@ impl Input {
                     result.push(c);
                     term.write_str(&c.to_string())?;
                 }
+                InputAction::OtherKey(Key::Backspace) => {
+                    result.pop();
+                    term.clear_chars(1)?;
+                }
+                _ => {}
             }
         }
     }
