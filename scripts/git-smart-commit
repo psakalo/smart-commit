@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# Find the index of the "--" argument
+index=1
+for arg in "$@"; do
+  if [[ "$arg" == "--" ]]; then
+    break
+  fi
+  let index++
+done
+
+# Split the arguments into two parts
+smart_commit_args=("${@:1:$index-1}")
+git_commit_args=("${@:$index+1}")
+
+# Call smart-commit with its arguments if any and save the output
+if [ ${#smart_commit_args[@]} -gt 0 ]; then
+  msg=$(smart-commit "${smart_commit_args[@]}")
+else
+  msg=$(smart-commit)
+fi
+
+# Execute git commit with the generated message and any additional arguments passed after "--"
+if [ ! -z "$msg" ]; then
+  git commit -m "$msg" "${git_commit_args[@]}"
+else
+  echo "No commit message generated."
+fi
