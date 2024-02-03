@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{ColorChoice, Parser};
 use once_cell::sync::Lazy;
 
 pub mod commands;
@@ -24,12 +24,20 @@ pub struct Args {
     pub model: String,
 
     /// Number of options to generate in interactive model
-    #[arg(short, long, default_value = "5", conflicts_with = "non_interactive")]
+    #[arg(short, long, default_value = "3", conflicts_with = "non_interactive")]
     pub results: usize,
 
     /// Will generate one message, print to stdout and exit
     #[arg(short, long, default_value = "false")]
     pub non_interactive: bool,
+
+    /// Colorize output
+    #[arg(short, long, default_value = "auto")]
+    pub color: ColorChoice,
 }
 
-pub static ARGS: Lazy<Args> = Lazy::new(Args::parse);
+pub static ARGS: Lazy<Args> = Lazy::new(|| {
+    let args = Args::parse();
+    console::set_colors_enabled(args.color == ColorChoice::Always);
+    args
+});
