@@ -27,8 +27,6 @@ pub fn run_commit(
 
     args.extend_from_slice(extra_args);
 
-    dbg!(&args);
-
     Command::new("git")
         // pass -F - and args
         .args(args)
@@ -59,7 +57,7 @@ fn get_file_diff(dir: &String, file: &String, context: usize) -> Result<String, 
     Ok(output)
 }
 
-const DEFAULT_SURROUNDING_LINES: usize = 10;
+const DEFAULT_SURROUNDING_LINES: usize = 0;
 
 /// This function tries to do it's best to evenly trim all staged diffs to not exceed total_length
 /// First full diff is generated, and if it doesn't exceed total_length, it's returned as is
@@ -71,7 +69,7 @@ pub fn get_staged_diff(dir: &String, total_length: usize) -> Result<Vec<String>,
 
     let diff: Vec<String> = files
         .iter()
-        .map(|file| get_file_diff(dir, &file, DEFAULT_SURROUNDING_LINES))
+        .map(|file| get_file_diff(dir, file, DEFAULT_SURROUNDING_LINES))
         .collect::<Result<Vec<String>, Box<dyn Error>>>()?;
 
     let current_length: usize = diff.iter().fold(0, |acc, x| acc + x.len());
@@ -82,7 +80,7 @@ pub fn get_staged_diff(dir: &String, total_length: usize) -> Result<Vec<String>,
     // Get diff with reduced context lines
     let mut diff = files
         .iter()
-        .map(|file| get_file_diff(dir, &file, 0))
+        .map(|file| get_file_diff(dir, file, 0))
         .collect::<Result<Vec<String>, Box<dyn Error>>>()?;
 
     loop {
