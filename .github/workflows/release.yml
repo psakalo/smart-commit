@@ -1,0 +1,45 @@
+name: Build and create release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build:
+    name: Build Rust project
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        default: true
+        components: rustfmt, clippy
+    - name: Build
+      uses: actions-rs/cargo@v1
+      with:
+        command: build
+        args: --release
+    - name: Upload artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: smart-commit
+        path: target/release/smart-commit
+
+  create-release:
+    name: Create Release and Upload Binary
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/download-artifact@v2
+      with:
+        name: smart-commit
+        path: target/release
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v1
+      with:
+          files: target/release/smart-commit
