@@ -1,6 +1,6 @@
 use std::{error::Error, process::Command};
 
-pub fn get_log_messages(dir: &String, limit: u32) -> Result<Vec<String>, Box<dyn Error>> {
+pub fn get_log_messages(dir: &str, limit: u32) -> Result<Vec<String>, Box<dyn Error>> {
     let output = Command::new("git")
         .args([
             "log",
@@ -38,7 +38,7 @@ pub fn run_commit(
     Ok(())
 }
 
-fn get_staged_files(dir: &String) -> Result<Vec<String>, Box<dyn Error>> {
+fn get_staged_files(dir: &str) -> Result<Vec<String>, Box<dyn Error>> {
     let output = Command::new("git")
         .args(["diff", "--staged", "--diff-filter=ACDMRTUXB", "--name-only"])
         .current_dir(dir)
@@ -48,7 +48,7 @@ fn get_staged_files(dir: &String) -> Result<Vec<String>, Box<dyn Error>> {
     Ok(output.lines().map(|line| line.to_string()).collect())
 }
 
-fn get_file_diff(dir: &String, file: &String, context: usize) -> Result<String, Box<dyn Error>> {
+fn get_file_diff(dir: &str, file: &str, context: usize) -> Result<String, Box<dyn Error>> {
     let output = Command::new("git")
         .args(["diff", "--cached", format!("-U{}", context).as_str(), file])
         .current_dir(dir)
@@ -57,14 +57,14 @@ fn get_file_diff(dir: &String, file: &String, context: usize) -> Result<String, 
     Ok(output)
 }
 
-const DEFAULT_SURROUNDING_LINES: usize = 0;
+const DEFAULT_SURROUNDING_LINES: usize = 10;
 
 /// This function tries to do it's best to evenly trim all staged diffs to not exceed total_length
 /// First full diff is generated, and if it doesn't exceed total_length, it's returned as is
 /// Next, new diffs are requested with reduced context lines. If total_length is still exceeded,
 /// diffs are sorted by length, and the longest is trimmed by 1 line from start and end
 /// until total_length is reached
-pub fn get_staged_diff(dir: &String, total_length: usize) -> Result<Vec<String>, Box<dyn Error>> {
+pub fn get_staged_diff(dir: &str, total_length: usize) -> Result<Vec<String>, Box<dyn Error>> {
     let files = get_staged_files(dir)?;
 
     let diff: Vec<String> = files
@@ -89,7 +89,7 @@ pub fn get_staged_diff(dir: &String, total_length: usize) -> Result<Vec<String>,
             return Ok(diff);
         }
 
-        diff.sort_by(|a, b| a.len().cmp(&b.len()));
+        diff.sort_by_key(|a| a.len());
 
         let longest_diff = diff.pop().unwrap();
         let trimmed_diff = longest_diff

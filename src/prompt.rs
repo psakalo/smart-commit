@@ -53,7 +53,7 @@ impl CommitCompletionData {
         length - 2048
     }
 
-    pub fn from_path(dir: &String, model: &str) -> Result<CommitCompletionData, PromptError> {
+    pub fn from_path(dir: &str, model: &str) -> Result<CommitCompletionData, PromptError> {
         let previous_messages =
             git::get_log_messages(dir, 10).map_err(|_| PromptError::GitError)?;
         let diff = git::get_staged_diff(dir, Self::get_length_for_model(model))
