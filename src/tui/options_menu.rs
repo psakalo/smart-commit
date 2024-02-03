@@ -42,11 +42,11 @@ impl OptionsMenu {
         )
     }
 
-    fn format_selected_option(&self, option: &String) -> String {
+    fn format_selected_option(&self, option: &str) -> String {
         style(format!("> {}", option)).cyan().to_string()
     }
 
-    fn format_unselected_option(&self, option: &String) -> String {
+    fn format_unselected_option(&self, option: &str) -> String {
         format!("  {}", option)
     }
 

@@ -3,7 +3,7 @@ use std::{error, fmt};
 use crate::{git, open_ai};
 
 pub struct CommitCompletionData {
-    // Previous commit message to use as context
+    // Previous commit messages to use as a context
     pub previous_messages: Vec<String>,
     pub diff: Vec<String>,
     pub model: String,

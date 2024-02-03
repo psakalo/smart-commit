@@ -14,11 +14,7 @@ pub fn get_log_messages(dir: &str, limit: u32) -> Result<Vec<String>, Box<dyn Er
     Ok(output.lines().map(|line| line.to_string()).collect())
 }
 
-pub fn run_commit(
-    dir: &String,
-    message: &str,
-    extra_args: &[String],
-) -> Result<(), Box<dyn Error>> {
+pub fn run_commit(dir: &str, message: &str, extra_args: &[String]) -> Result<(), Box<dyn Error>> {
     let mut args = vec![
         String::from("commit"),
         String::from("-m"),
