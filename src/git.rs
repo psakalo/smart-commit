@@ -1,100 +1,100 @@
-use std::{error::Error, process::Command};
+use std::{collections::HashMap, fmt};
 
-pub fn get_log_messages(dir: &str, limit: u32) -> Result<Vec<String>, Box<dyn Error>> {
-    let output = Command::new("git")
-        .args([
-            "log",
-            "--pretty=format:%s",
-            &format!("--max-count={}", limit),
-        ])
-        .current_dir(dir)
-        .output()?;
-    let output = String::from_utf8(output.stdout)?;
+use git2::{Delta, DiffFormat, Repository};
 
-    Ok(output.lines().map(|line| line.to_string()).collect())
+pub enum GitError {
+    Git2Error(git2::Error),
+    DiffProcessingError,
 }
 
-pub fn run_commit(dir: &str, message: &str, extra_args: &[String]) -> Result<(), Box<dyn Error>> {
-    let mut args = vec![
-        String::from("commit"),
-        String::from("-m"),
-        message.to_string(),
-    ];
-
-    args.extend_from_slice(extra_args);
-
-    Command::new("git")
-        // pass -F - and args
-        .args(args)
-        .current_dir(dir)
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .spawn()?;
-
-    Ok(())
-}
-
-fn get_staged_files(dir: &str) -> Result<Vec<String>, Box<dyn Error>> {
-    let output = Command::new("git")
-        .args(["diff", "--staged", "--diff-filter=ACDMRTUXB", "--name-only"])
-        .current_dir(dir)
-        .output()?;
-    let output = String::from_utf8(output.stdout)?;
-
-    Ok(output.lines().map(|line| line.to_string()).collect())
-}
-
-fn get_file_diff(dir: &str, file: &str, context: usize) -> Result<String, Box<dyn Error>> {
-    let output = Command::new("git")
-        .args(["diff", "--cached", format!("-U{}", context).as_str(), file])
-        .current_dir(dir)
-        .output()?;
-    let output = String::from_utf8(output.stdout)?;
-    Ok(output)
-}
-
-const DEFAULT_SURROUNDING_LINES: usize = 10;
-
-/// This function tries to do it's best to evenly trim all staged diffs to not exceed total_length
-/// First full diff is generated, and if it doesn't exceed total_length, it's returned as is
-/// Next, new diffs are requested with reduced context lines. If total_length is still exceeded,
-/// diffs are sorted by length, and the longest is trimmed by 1 line from start and end
-/// until total_length is reached
-pub fn get_staged_diff(dir: &str, total_length: usize) -> Result<Vec<String>, Box<dyn Error>> {
-    let files = get_staged_files(dir)?;
-
-    let diff: Vec<String> = files
-        .iter()
-        .map(|file| get_file_diff(dir, file, DEFAULT_SURROUNDING_LINES))
-        .collect::<Result<Vec<String>, Box<dyn Error>>>()?;
-
-    let current_length: usize = diff.iter().fold(0, |acc, x| acc + x.len());
-    if current_length <= total_length {
-        return Ok(diff);
+impl From<git2::Error> for GitError {
+    fn from(e: git2::Error) -> Self {
+        GitError::Git2Error(e)
     }
+}
 
-    // Get diff with reduced context lines
-    let mut diff = files
-        .iter()
-        .map(|file| get_file_diff(dir, file, 0))
-        .collect::<Result<Vec<String>, Box<dyn Error>>>()?;
+impl fmt::Display for GitError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            GitError::Git2Error(e) => write!(f, "Git2 error: {}", e),
+            GitError::DiffProcessingError => write!(f, "Diff processing error"),
+        }
+    }
+}
 
-    loop {
-        let current_length: usize = diff.iter().fold(0, |acc, x| acc + x.len());
-        if current_length <= total_length {
-            return Ok(diff);
+pub fn get_log_messages(dir: &str, limit: usize) -> Result<Vec<String>, GitError> {
+    let repo = Repository::open(dir)?;
+    let mut revwalk = repo.revwalk()?;
+    revwalk.push_head()?;
+    revwalk.set_sorting(git2::Sort::TIME)?;
+
+    revwalk
+        .take(limit)
+        .map(|id| {
+            id.and_then(|id| repo.find_commit(id))
+                .map(|commit| commit.summary().unwrap_or_default().to_string())
+                .map_err(GitError::from)
+        })
+        .collect::<Result<Vec<String>, GitError>>()
+}
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum FileDiffType {
+    Added,
+    Deleted,
+    Modified,
+}
+
+pub struct FileDiff {
+    pub delta_type: FileDiffType,
+    pub formatted_diff: String,
+}
+
+pub fn get_staged_diff(dir: &str) -> Result<HashMap<String, FileDiff>, GitError> {
+    let repo = Repository::open(dir)?;
+    let head = repo.head()?.peel_to_tree()?;
+    let diff = repo.diff_tree_to_index(Some(&head), None, None)?;
+
+    let mut file_diffs: HashMap<String, FileDiff> = HashMap::new();
+
+    diff.print(DiffFormat::Patch, |delta, _hunk, line| {
+        let file_path = delta
+            .new_file()
+            .path()
+            .map(|p| p.to_string_lossy().to_string());
+        if file_path.is_none() {
+            return false;
+        }
+        let file_path = file_path.unwrap();
+
+        let delta_type = match delta.status() {
+            Delta::Added => FileDiffType::Added,
+            Delta::Deleted => FileDiffType::Deleted,
+            Delta::Modified => FileDiffType::Modified,
+            _ => return false,
+        };
+
+        let file_diff = file_diffs.entry(file_path).or_insert_with(|| FileDiff {
+            delta_type,
+            formatted_diff: String::new(),
+        });
+
+        // I don't know if this can happen, but lets be safe
+        if file_diff.delta_type != delta_type {
+            return false;
         }
 
-        diff.sort_by_key(|a| a.len());
+        file_diff.formatted_diff.push_str(
+            format!(
+                "{}{}",
+                line.origin(),
+                String::from_utf8_lossy(line.content())
+            )
+            .as_ref(),
+        );
 
-        let longest_diff = diff.pop().unwrap();
-        let trimmed_diff = longest_diff
-            .lines()
-            .skip(1)
-            .take(longest_diff.lines().count() - 2)
-            .collect::<Vec<&str>>()
-            .join("\n");
+        true
+    })?;
 
-        diff.push(trimmed_diff);
-    }
+    Ok(file_diffs)
 }
