@@ -23,8 +23,8 @@ pub struct Args {
     #[arg(short, long, default_value = "gpt-3.5-turbo")]
     pub model: String,
 
-    /// Number of options to generate in interactive model
-    #[arg(short, long, default_value = "3", conflicts_with = "non_interactive")]
+    /// Number of options to generate. In non-interactive mode, optins will be separated by newline
+    #[arg(short, long, default_value = "3")]
     pub results: usize,
 
     /// Will generate one message, print to stdout and exit
@@ -34,6 +34,10 @@ pub struct Args {
     /// Colorize output
     #[arg(short, long, default_value = "auto")]
     pub color: ColorChoice,
+
+    /// print debug information such as prompt
+    #[arg(short, long, default_value = "false")]
+    pub debug: bool,
 }
 
 pub static ARGS: Lazy<Args> = Lazy::new(|| {

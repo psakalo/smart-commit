@@ -33,12 +33,16 @@ impl Input {
         format!("{} {}: ", style("?").cyan(), style(&self.message).bold(),)
     }
 
-    pub fn read_answer(&self) -> io::Result<String> {
+    pub fn read_answer(&self, prefill: &Option<&str>) -> io::Result<String> {
         let term = Term::stderr();
 
         term.write_str(&self.format_message())?;
 
-        let mut result = String::new();
+        let mut result = String::from(prefill.unwrap_or(""));
+
+        if let Some(prefill) = prefill {
+            term.write_str(prefill)?;
+        }
 
         loop {
             match self.read_action(&term)? {
@@ -51,8 +55,9 @@ impl Input {
                     term.write_str(&c.to_string())?;
                 }
                 InputAction::OtherKey(Key::Backspace) => {
-                    result.pop();
-                    term.clear_chars(1)?;
+                    if result.pop().is_some() {
+                        term.clear_chars(1)?;
+                    }
                 }
                 _ => {}
             }
