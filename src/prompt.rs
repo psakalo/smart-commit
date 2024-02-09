@@ -1,14 +1,14 @@
-use std::{error, fmt};
+use std::{collections::HashMap, error, fmt};
 
-use crate::{git, open_ai};
+use crate::{git, open_ai, ARGS};
 
 pub struct CommitCompletionData {
     // Previous commit messages to use as a context
     pub previous_messages: Vec<String>,
-    pub diff: Vec<String>,
+    pub diff: HashMap<String, git::FileDiff>,
     pub model: String,
 
-    refinement_prompt: Option<String>,
+    pub refinement_prompt: Option<String>,
 }
 
 #[derive(Debug)]
@@ -36,7 +36,9 @@ impl fmt::Display for PromptError {
     }
 }
 
-const PROMPT: &str = include_str!("prompt.txt");
+static SYSTEM_PROMPT: &str = "You are a CLI program designed to generate clear, concise, and informative git commit messages for users based on provided diffs. Your response should be a one-line string, up to 80 characters long, that concisely summarizes the changes made.
+When crafting commit messages, consider the context of the change, its purpose, and its impact on the project.
+Focus on action verbs, clear descriptions, and the specific area of the project affected by the changes.";
 
 impl error::Error for PromptError {}
 
@@ -56,8 +58,7 @@ impl CommitCompletionData {
     pub fn from_path(dir: &str, model: &str) -> Result<CommitCompletionData, PromptError> {
         let previous_messages =
             git::get_log_messages(dir, 10).map_err(|_| PromptError::GitError)?;
-        let diff = git::get_staged_diff(dir, Self::get_length_for_model(model))
-            .map_err(|_| PromptError::NoStagedFiles)?;
+        let diff = git::get_staged_diff(dir).map_err(|_| PromptError::NoStagedFiles)?;
 
         let result = CommitCompletionData {
             previous_messages,
@@ -69,74 +70,51 @@ impl CommitCompletionData {
         Ok(result)
     }
 
-    fn build_prompt(&self) -> Result<String, PromptError> {
-        if self.diff.is_empty() {
-            return Err(PromptError::NoStagedFiles);
-        }
-
-        let prompt = PROMPT.to_string();
-
-        let prompt = prompt.replace(
-            "{{ previous_messages_block }}",
-            if self.previous_messages.is_empty() {
-                "".to_string()
-            } else {
-                let mut block = String::from("# Previous commit messages:\n");
-
-                self.previous_messages.iter().for_each(|message| {
-                    block.push_str(&format!("  - {}\n", message));
-                });
-
-                block
-            }
-            .as_str(),
-        );
-
-        let prompt = prompt.replace(
-            "{{ diff }}",
-            {
-                let mut diffs = String::new();
-
-                self.diff.iter().for_each(|file_diff| {
-                    diffs.push_str(&format!("\n```diff\n{}\n```\n", file_diff));
-                });
-
-                diffs
-            }
-            .as_str(),
-        );
-
-        Ok(prompt)
-    }
-
     fn build_request_body(
         &self,
         model: &str,
         num_results: usize,
     ) -> Result<serde_json::Value, PromptError> {
-        let content = self.build_prompt()?;
+        if self.diff.is_empty() {
+            return Err(PromptError::NoStagedFiles);
+        }
 
-        let mut body = serde_json::json!({
+        let mut system_prompt = String::from(SYSTEM_PROMPT);
+
+        if !self.previous_messages.is_empty() {
+            system_prompt.push_str("\nUse the following previous commits as a style guide for consistency and clarity:\n");
+            self.previous_messages.iter().for_each(|message| {
+                system_prompt.push_str(&format!("  - {}\n", message));
+            });
+            system_prompt.push('\n');
+        }
+
+        if let Some(refinement_prompt) = &self.refinement_prompt {
+            system_prompt.push_str("Additionally, consider following requirements:\n");
+            system_prompt.push_str(refinement_prompt);
+        }
+
+        let mut user_prompt = String::new();
+        user_prompt.push_str("# Git diff:\n");
+        self.diff.iter().for_each(|(_path, file_diff)| {
+            user_prompt.push_str(&format!("```diff\n{}\n```\n", file_diff.formatted_diff));
+        });
+
+        let body = serde_json::json!({
             "model": model,
             "n": num_results,
-            "temperature": 1,
+            "stop": "\n",
             "messages": [
                 {
+                    "role": "system",
+                    "content": system_prompt
+                },
+                {
                     "role": "user",
-                    "content": content
+                    "content": user_prompt
                 },
             ]
         });
-
-        if let Some(refinement_prompt) = &self.refinement_prompt {
-            let messages = body.as_object_mut().unwrap()["messages"]
-                .as_array_mut()
-                .unwrap();
-            messages.push(serde_json::json!({
-                "role": "user",
-                "content": refinement_prompt
-            }));
-        }
 
         Ok(body)
     }
@@ -156,6 +134,7 @@ impl CommitCompletionData {
                     .lines()
                     .next()
                     .ok_or(PromptError::OpenAiWrongContent(text.clone().to_string()))?
+                    .trim()
                     .to_string())
             })
             .collect::<Result<Vec<String>, PromptError>>()
@@ -169,6 +148,23 @@ impl CommitCompletionData {
         self.refinement_prompt = refinement_prompt;
 
         let body = self.build_request_body(&self.model, num_results)?;
+        if ARGS.debug {
+            eprintln!("{}", console::style("\n[DEBUG] System prompt:").blue());
+            eprintln!(
+                "{}\n",
+                body["messages"][0]["content"]
+                    .to_string()
+                    .replace("\\n", "\n")
+            );
+            eprintln!("{}", console::style("\n[DEBUG] User prompt:").blue());
+            eprintln!(
+                "{}\n",
+                body["messages"][1]["content"]
+                    .to_string()
+                    .replace("\\n", "\n")
+            );
+        }
+
         let completion = open_ai::get_completion(body).map_err(PromptError::OpenAiError)?;
         let results = self.extract_results(completion)?;
         Ok(results)
