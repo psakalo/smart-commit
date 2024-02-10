@@ -1,6 +1,7 @@
+use anyhow::Result;
 use std::{collections::HashMap, error, fmt};
 
-use crate::{git, open_ai, ARGS};
+use crate::{args::ARGS, git, open_ai};
 
 pub struct CommitCompletionData {
     // Previous commit messages to use as a context
@@ -19,7 +20,6 @@ pub enum PromptError {
     /// OpenAI returned a response, but it was not in the expected format,
     /// for example unexpected number of lines
     OpenAiWrongContent(String),
-    OpenAiError(open_ai::OpenAIError),
     GitError,
 }
 
@@ -30,13 +30,13 @@ impl fmt::Display for PromptError {
             PromptError::OpenAiNoChoices => write!(f, "OpenAI returned no choices"),
             PromptError::OpenAiNoContent => write!(f, "OpenAI returned no content"),
             PromptError::OpenAiWrongContent(m) => write!(f, "OpenAI returned wrong content: {}", m),
-            PromptError::OpenAiError(e) => write!(f, "OpenAI error: {}", e),
             PromptError::GitError => write!(f, "Git error"),
         }
     }
 }
 
-static SYSTEM_PROMPT: &str = "You are a CLI program designed to generate clear, concise, and informative git commit messages for users based on provided diffs. Your response should be a one-line string, up to 80 characters long, that concisely summarizes the changes made.
+static SYSTEM_PROMPT: &str = "You are a CLI program designed to generate clear, concise, and informative git commit messages for users based on provided diffs. 
+Your response should be a short one-line string, that concisely summarizes the changes made.
 When crafting commit messages, consider the context of the change, its purpose, and its impact on the project.
 Focus on action verbs, clear descriptions, and the specific area of the project affected by the changes.";
 
@@ -142,9 +142,10 @@ impl CommitCompletionData {
 
     pub fn complete_commit_messages(
         &mut self,
+        openai_client: &open_ai::OpenAIClient,
         num_results: usize,
         refinement_prompt: Option<String>,
-    ) -> Result<Vec<String>, PromptError> {
+    ) -> Result<Vec<String>> {
         self.refinement_prompt = refinement_prompt;
 
         let body = self.build_request_body(&self.model, num_results)?;
@@ -165,7 +166,7 @@ impl CommitCompletionData {
             );
         }
 
-        let completion = open_ai::get_completion(body).map_err(PromptError::OpenAiError)?;
+        let completion = openai_client.get_completion(body)?;
         let results = self.extract_results(completion)?;
         Ok(results)
     }
