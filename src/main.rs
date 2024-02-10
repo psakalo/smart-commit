@@ -1,8 +1,8 @@
 use std::process;
 
 use smart_commit::{
+    args::ARGS,
     commands::{run_interactive, run_non_interactive},
-    ARGS,
 };
 
 fn main() {

@@ -38,7 +38,8 @@ impl fmt::Display for PromptError {
 static SYSTEM_PROMPT: &str = "You are a CLI program designed to generate clear, concise, and informative git commit messages for users based on provided diffs. 
 Your response should be a short one-line string, that concisely summarizes the changes made.
 When crafting commit messages, consider the context of the change, its purpose, and its impact on the project.
-Focus on action verbs, clear descriptions, and the specific area of the project affected by the changes.";
+Focus on action verbs, clear descriptions, and the specific area of the project affected by the changes.
+Don't overuse word 'refactoring'.";
 
 impl error::Error for PromptError {}
 
