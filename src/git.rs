@@ -1,29 +1,9 @@
-use std::{collections::HashMap, fmt};
+use anyhow::Result;
+use std::collections::HashMap;
 
 use git2::{Delta, DiffFormat, Repository};
 
-pub enum GitError {
-    Git2Error(git2::Error),
-    DiffProcessingError,
-}
-
-impl From<git2::Error> for GitError {
-    fn from(e: git2::Error) -> Self {
-        GitError::Git2Error(e)
-    }
-}
-
-impl fmt::Display for GitError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            GitError::Git2Error(e) => write!(f, "Git2 error: {}", e),
-            GitError::DiffProcessingError => write!(f, "Diff processing error"),
-        }
-    }
-}
-
-pub fn get_log_messages(dir: &str, limit: usize) -> Result<Vec<String>, GitError> {
-    let repo = Repository::open(dir)?;
+pub fn get_log_messages(repo: &Repository, limit: usize) -> Result<Vec<String>> {
     let mut revwalk = repo.revwalk()?;
     revwalk.push_head()?;
     revwalk.set_sorting(git2::Sort::TIME)?;
@@ -31,11 +11,11 @@ pub fn get_log_messages(dir: &str, limit: usize) -> Result<Vec<String>, GitError
     revwalk
         .take(limit)
         .map(|id| {
-            id.and_then(|id| repo.find_commit(id))
+            id.map_err(anyhow::Error::from)
+                .and_then(|id| repo.find_commit(id).map_err(anyhow::Error::from))
                 .map(|commit| commit.summary().unwrap_or_default().to_string())
-                .map_err(GitError::from)
         })
-        .collect::<Result<Vec<String>, GitError>>()
+        .collect()
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -50,8 +30,7 @@ pub struct FileDiff {
     pub formatted_diff: String,
 }
 
-pub fn get_staged_diff(dir: &str) -> Result<HashMap<String, FileDiff>, GitError> {
-    let repo = Repository::open(dir)?;
+pub fn get_staged_diff(repo: &Repository) -> Result<HashMap<String, FileDiff>> {
     let head = repo.head()?.peel_to_tree()?;
     let diff = repo.diff_tree_to_index(Some(&head), None, None)?;
 

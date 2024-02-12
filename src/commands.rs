@@ -1,13 +1,18 @@
 use anyhow::Result;
 use inquire::{Select, Text};
 
-use crate::{args::ARGS, open_ai, prompt::CommitCompletionData};
+use crate::{
+    args::ARGS,
+    open_ai,
+    prompt::{common::PromptData, common::PromptGenerator, single_request::SingleRequestPrompt},
+};
 
 pub fn run_interactive() -> Result<()> {
     let openai_client = open_ai::OpenAIClient::new(open_ai::OpenAIKey::new_ensure()?);
-    let mut completion_data = CommitCompletionData::from_path(&ARGS.path, &ARGS.model)?;
-    let mut results =
-        completion_data.complete_commit_messages(&openai_client, ARGS.results, None)?;
+    let repo = git2::Repository::open(&ARGS.path)?;
+    let completion_data = PromptData::from_repo(&repo, &openai_client, &ARGS.model)?;
+    let mut prompt = SingleRequestPrompt::from(completion_data);
+    let mut results = prompt.generate_results(ARGS.results)?;
 
     let choice = loop {
         let mut options: Vec<String> = results
@@ -25,7 +30,7 @@ pub fn run_interactive() -> Result<()> {
         if choice == results.len() {
             let mut refinement_prompt = String::new();
 
-            if let Some(prompt) = completion_data.refinement_prompt.as_ref() {
+            if let Some(prompt) = prompt.get_refinement_prompt().as_ref() {
                 refinement_prompt.push_str(prompt);
             }
 
@@ -33,11 +38,8 @@ pub fn run_interactive() -> Result<()> {
                 .with_initial_value(&refinement_prompt)
                 .prompt()?;
 
-            results = completion_data.complete_commit_messages(
-                &openai_client,
-                ARGS.results,
-                Some(refinement_prompt),
-            )?;
+            prompt.update_refinement_prompt(refinement_prompt);
+            results = prompt.generate_results(ARGS.results)?;
         } else {
             break choice;
         }
@@ -50,8 +52,10 @@ pub fn run_interactive() -> Result<()> {
 
 pub fn run_non_interactive() -> Result<()> {
     let openai_client = open_ai::OpenAIClient::new(open_ai::OpenAIKey::new_ensure()?);
-    let mut completion_data = CommitCompletionData::from_path(&ARGS.path, &ARGS.model)?;
-    let results = completion_data.complete_commit_messages(&openai_client, ARGS.results, None)?;
+    let repo = git2::Repository::open(&ARGS.path)?;
+    let completion_data = PromptData::from_repo(&repo, &openai_client, &ARGS.model)?;
+    let prompt = SingleRequestPrompt::from(completion_data);
+    let results = prompt.generate_results(ARGS.results)?;
 
     println!("{}", results.join("\n"));
 
